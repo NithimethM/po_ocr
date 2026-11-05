@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,7 @@ from po_extract import (
     HEADER_KEYS,
     ITEM_KEYS,
     OllamaError,
+    create_new_workbook,
     extract_po,
     read_existing_po_numbers,
     list_models,
@@ -177,8 +179,15 @@ for h, f in hashes.items():
 
 # --------------------------------------------------------------------------------------- step 3: write
 step(3, "เขียนลงไฟล์ Excel")
-tpl = st.file_uploader("ไฟล์ Excel ปลายทาง (ต้องมีชีตชื่อ PO) เช่น PO_Template.xlsm", type=["xlsm", "xlsx"], key="po_tpl")
-append = st.checkbox("เขียนต่อท้ายข้อมูลเดิมในชีต PO", value=True)
+dest = st.radio("ปลายทาง", ["เขียนลงไฟล์ Excel เดิม (มี macro)", "สร้างไฟล์ Excel ใหม่"], horizontal=True)
+new_file = dest.startswith("สร้าง")
+tpl = None
+append = True
+if new_file:
+    st.caption("ได้ไฟล์ .xlsx ใหม่ที่มีชีต PO ตำแหน่งคอลัมน์เหมือนของ macro แต่ไม่มี macro — ถ้าจะใช้สร้าง SO ให้คัดลอกแถวไปวางในไฟล์ macro")
+else:
+    tpl = st.file_uploader("ไฟล์ Excel ปลายทาง (ต้องมีชีตชื่อ PO) เช่น PO_Template.xlsm", type=["xlsm", "xlsx"], key="po_tpl")
+    append = st.checkbox("เขียนต่อท้ายข้อมูลเดิมในชีต PO", value=True)
 dup_msgs: list[str] = []
 seen_nos: dict[str, int] = {}
 for p_ in final:
@@ -198,14 +207,19 @@ if total_issues:
     ack = st.checkbox(f"ฉันตรวจข้อมูลแล้ว (ยังมี {total_issues} ข้อควรตรวจ) — ข้อมูลนี้จะถูกใช้สร้าง SO ใน SAP")
 rows_n = sum(len(p["items"]) for p in final)
 go = st.button(f"✨ สร้างไฟล์ Excel ({len(final)} ใบ PO · {rows_n} แถว)", type="primary", width="stretch",
-               disabled=not (tpl and final and ack and rows_n))
-if not tpl:
+               disabled=not ((tpl or new_file) and final and ack and rows_n))
+if not tpl and not new_file:
     st.caption("เลือกไฟล์ปลายทางก่อน — โปรแกรมไม่แก้ไฟล์ต้นฉบับ แต่ให้ดาวน์โหลดไฟล์ใหม่ที่เขียนต่อท้ายแล้ว")
 if go:
     try:
-        out, total = write_pos_to_workbook(tpl.getvalue(), final, append)
-        stem, _, ext = tpl.name.rpartition(".")
-        st.session_state["po_out"] = {"bytes": out, "name": f"{stem}_updated.{ext}", "rows": rows_n, "total": total}
+        if new_file:
+            out, total = create_new_workbook(final)
+            name = f"PO_{datetime.now():%Y%m%d_%H%M}.xlsx"
+        else:
+            out, total = write_pos_to_workbook(tpl.getvalue(), final, append)
+            stem, _, ext = tpl.name.rpartition(".")
+            name = f"{stem}_updated.{ext}"
+        st.session_state["po_out"] = {"bytes": out, "name": name, "rows": rows_n, "total": total}
     except Exception as exc:
         st.error(f"เขียนไฟล์ไม่สำเร็จ: {exc}")
 out = st.session_state.get("po_out")

@@ -367,6 +367,30 @@ def write_pos_to_workbook(template_bytes: bytes, pos: list[dict], append: bool =
     return out.getvalue(), total
 
 
+def create_new_workbook(pos: list[dict]) -> tuple[bytes, int]:
+    """Build a brand-new .xlsx with a 'PO' sheet (same cell layout as the macro sheet, headers in row 5).
+    Returns (file bytes, row count). The new file has no macro."""
+    from openpyxl.styles import Font, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "PO"
+    headers = {1: "PO No.", 2: "Sold-to", 5: "Ship-to", 6: "Ship date",
+               10: "Material code", 11: "Description", 12: "Qty", 13: "Unit"}
+    widths = {1: 18, 2: 32, 5: 40, 6: 14, 10: 20, 11: 40, 12: 10, 13: 8}
+    for col, name in headers.items():
+        c = ws.cell(row=5, column=col, value=name)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="2E75B6")
+        ws.column_dimensions[c.column_letter].width = widths[col]
+    ws.freeze_panes = "A6"
+    total = 0
+    for data in pos:
+        total = write_po_to_sheet(ws, data, append=True)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue(), total
+
+
 def read_existing_po_numbers(template_bytes: bytes, start_row: int = 6) -> set[str]:
     """PO numbers already in column A of the 'PO' sheet (to warn about double entry)."""
     wb = openpyxl.load_workbook(io.BytesIO(template_bytes), read_only=True, data_only=True)
