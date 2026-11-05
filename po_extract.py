@@ -23,6 +23,7 @@ DEFAULT_VISION_MODEL = "qwen2.5vl:7b"   # scans / photos (any Ollama vision mode
 
 ALLOWED_UNITS = {"BOX", "M2", "PC", "ST", "SH", "PCS"}   # same list as the macro's dataverify()
 MATERIAL_CODE_LEN = 16                                    # macro rule
+MATERIAL_CODE_RE = re.compile(r"\bZ[A-Z0-9]{15}\b")             # fallback pattern: 16 chars starting with Z
 MIN_TEXT_CHARS = 50                                       # below this a PDF is treated as scanned
 MAX_TEXT_CHARS = 30000
 MAX_VISION_PAGES = 4
@@ -30,9 +31,12 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 
 # Edit this to match the column headers printed on your PO. The model uses it to map table columns.
 COLUMN_HINT = (
-    "Line-item table columns, left to right: item no. | product code (buyer's own code) | "
+    "Line-item table columns, left to right: item no. | product code (buyer's own code, usually 8 digits) | "
     "material code (16-character SAP code) | description | ... | quantity | unit. "
-    "Header names on the PDF may differ; decide by position and by what the values look like."
+    "The material code column may be headed 'Material code', 'Barcode', \"Vendor's Item code\" or "
+    "'Barcode / Vendor's Item code'. Its values are 16 characters of letters and digits, usually starting with Z "
+    "(for example Z21SAA40061961A1). Never put it in product_code, and never leave material_code empty if such a value "
+    "is on the row. Decide by position and by what the values look like."
 )
 
 SYSTEM_PROMPT = (
@@ -215,6 +219,23 @@ def merge_pages(results: list[dict]) -> dict:
     return merged
 
 
+def fill_missing_material_codes(data: dict, source_text: str, notes: list[str]) -> None:
+    """Text PDFs only: if the model left material_code empty, recover it from the document text by pattern."""
+    missing = [it for it in data["items"] if not it["material_code"]]
+    if not missing:
+        return
+    found = list(dict.fromkeys(MATERIAL_CODE_RE.findall(source_text.upper())))   # unique, in document order
+    if len(found) == len(data["items"]):
+        # one code per line item: assign by position
+        for it, code in zip(data["items"], found):
+            if not it["material_code"]:
+                it["material_code"] = code
+        notes.append("Material code ถูกเติมอัตโนมัติจากรูปแบบรหัส (ขึ้นต้นด้วย Z, 16 ตัว) — ตรวจว่าตรงกับแต่ละแถว")
+    elif found:
+        notes.append(f"พบรหัสขึ้นต้น Z {len(found)} ตัวในเอกสาร แต่มี {len(data['items'])} รายการ จึงไม่เติมให้อัตโนมัติ "
+                     f"— รหัสที่พบ: {', '.join(found)}")
+
+
 def extract_po(file_bytes: bytes, filename: str, url: str, model: str, vision_model: str, num_ctx: int = 12288,
                force_vision: bool = False, log: Callable[[str], None] = lambda m: None) -> dict:
     """Returns {"data", "source_text" (None for images/scans), "mode": "text"|"vision", "notes": [...]}."""
@@ -232,7 +253,9 @@ def extract_po(file_bytes: bytes, filename: str, url: str, model: str, vision_mo
             prompt_text = prompt_text[:MAX_TEXT_CHARS]
         log(f"อ่านข้อความจากไฟล์ แล้วส่งให้ {model}")
         raw = chat_json(url, model, "Extract the PO below.\n\n" + prompt_text, num_ctx=num_ctx)
-        return {"data": clean_result(raw), "source_text": source_text, "mode": "text", "notes": notes}
+        data = clean_result(raw)
+        fill_missing_material_codes(data, source_text, notes)
+        return {"data": data, "source_text": source_text, "mode": "text", "notes": notes}
     images = [image_to_b64(file_bytes)] if is_image else render_pages_b64(file_bytes)
     log(f"อ่านจากภาพ {len(images)} หน้า ด้วย {vision_model}")
     results = []
