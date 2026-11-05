@@ -179,7 +179,7 @@ for h, f in hashes.items():
 
 # --------------------------------------------------------------------------------------- step 3: write
 step(3, "เขียนลงไฟล์ Excel")
-dest = st.radio("ปลายทาง", ["เขียนลงไฟล์ Excel เดิม (มี macro)", "สร้างไฟล์ Excel ใหม่"], horizontal=True)
+dest = st.radio("ปลายทาง", ["เขียนลงไฟล์ Excel เดิม", "สร้างไฟล์ Excel ใหม่"], horizontal=True)
 new_file = dest.startswith("สร้าง")
 tpl = None
 append = True
